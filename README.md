@@ -11,6 +11,7 @@ This mini-game demonstrates a projectile that moves through 3D space with consta
 - Real-time visualization of trajectory, velocity, and acceleration vectors plus HUD metrics (speed, |a|, radius of curvature, |w|)
 - Objective loop with glowing energy gates to chase, earn score, and set lap records
 - Lock-to-target mode (press **L**) that automatically steers the projectile toward the current gate
+- Cached geometry and a 120 FPS render loop for smoother flight and lower CPU overhead
 
 ## Requirements
 
@@ -38,7 +39,7 @@ Controls:
 
 ## Objective
 
-Hunt the luminous target gates in order. Fly through the highlighted gate to bank points, then chase the next one. Clear all five gates to finish a lap—your score climbs, the arena respawns a fresh pattern, and the HUD records your lap time (with best-time tracking) so you can perfect your ribbon line. Need a hand? Toggle **L** to lock the controls so the projectile automatically steers toward the current gate while you focus on camera framing.
+Hunt the luminous target gates in order. Fly through the highlighted gate to bank points, then chase the next one. Clear all five gates to finish a lap—your score climbs, the arena respawns a fresh pattern, and the HUD records your lap time (with best-time tracking) so you can perfect your ribbon line. Need a hand? Toggle **L** to lock the controls so the projectile automatically steers toward the current gate while you focus on camera framing. The render loop now targets 120 FPS and reuses cached geometry so the action stays fluid even with all the neon set dressing enabled.
 
 ## Tests
 

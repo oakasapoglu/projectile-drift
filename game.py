@@ -26,6 +26,74 @@ OBJECTIVE_FLASH_COLOR = (255, 200, 120)
 
 GRID_SIZE = 900
 GRID_STEP = 80
+FPS_TARGET = 120
+FOCUS_OFFSET = np.array([0.0, 0.0, 30.0], dtype=np.float64)
+UNIT_Z = np.array([0.0, 0.0, 1.0], dtype=np.float64)
+
+
+def _unit_ring_points(segments: int) -> np.ndarray:
+    angles = np.linspace(0.0, math.tau, segments, endpoint=False)
+    cos_vals = np.cos(angles)
+    sin_vals = np.sin(angles)
+    return np.stack((cos_vals, sin_vals, np.zeros_like(cos_vals)), axis=1)
+
+
+RING_UNIT_CACHE: dict[int, np.ndarray] = {}
+
+
+def get_ring_points(center: np.ndarray, radius: float, segments: int) -> np.ndarray:
+    if segments not in RING_UNIT_CACHE:
+        RING_UNIT_CACHE[segments] = _unit_ring_points(segments)
+    unit = RING_UNIT_CACHE[segments]
+    return center + unit * radius
+
+
+def _build_grid_lines() -> list[tuple[np.ndarray, np.ndarray]]:
+    lines: list[tuple[np.ndarray, np.ndarray]] = []
+    for offset in range(-GRID_SIZE, GRID_SIZE + 1, GRID_STEP):
+        lines.append(
+            (
+                np.array([offset, -GRID_SIZE, 0.0], dtype=np.float64),
+                np.array([offset, GRID_SIZE, 0.0], dtype=np.float64),
+            )
+        )
+        lines.append(
+            (
+                np.array([-GRID_SIZE, offset, 0.0], dtype=np.float64),
+                np.array([GRID_SIZE, offset, 0.0], dtype=np.float64),
+            )
+        )
+    return lines
+
+
+GRID_LINES = _build_grid_lines()
+
+
+AXIS_LINES = [
+    (
+        np.array([-GRID_SIZE, 0.0, 0.0], dtype=np.float64),
+        np.array([GRID_SIZE, 0.0, 0.0], dtype=np.float64),
+        (255, 100, 100),
+    ),
+    (
+        np.array([0.0, -GRID_SIZE, 0.0], dtype=np.float64),
+        np.array([0.0, GRID_SIZE, 0.0], dtype=np.float64),
+        (100, 255, 120),
+    ),
+    (
+        np.array([0.0, 0.0, 0.0], dtype=np.float64),
+        np.array([0.0, 0.0, GRID_SIZE], dtype=np.float64),
+        (120, 140, 255),
+    ),
+]
+
+
+PILLAR_CORNER_OFFSETS = [
+    np.array([40.0, 40.0, 0.0]),
+    np.array([-40.0, 40.0, 0.0]),
+    np.array([-40.0, -40.0, 0.0]),
+    np.array([40.0, -40.0, 0.0]),
+]
 
 
 def clamp(value: float, min_value: float, max_value: float) -> float:
@@ -40,10 +108,18 @@ class Camera:
     pitch: float = math.radians(-25.0)
     height_offset: float = 140.0
     focus: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    _position: np.ndarray = field(init=False, default_factory=lambda: np.zeros(3))
+    _right: np.ndarray = field(init=False, default_factory=lambda: np.array([1.0, 0.0, 0.0]))
+    _up: np.ndarray = field(init=False, default_factory=lambda: np.array([0.0, 0.0, 1.0]))
+    _forward: np.ndarray = field(init=False, default_factory=lambda: np.array([0.0, 0.0, -1.0]))
+    _basis_ready: bool = field(init=False, default=False)
 
     def update_focus(self, target: np.ndarray, dt: float) -> None:
         smoothing = 6.0
-        self.focus += (target - self.focus) * clamp(smoothing * dt, 0.0, 1.0)
+        delta = (target - self.focus) * clamp(smoothing * dt, 0.0, 1.0)
+        if np.linalg.norm(delta) > 1e-6:
+            self.focus += delta
+            self._basis_ready = False
 
     def position(self) -> np.ndarray:
         x = self.focus[0] + self.radius * math.cos(self.pitch) * math.cos(self.yaw)
@@ -52,15 +128,27 @@ class Camera:
         return np.array([x, y, z], dtype=np.float64)
 
     def _basis(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        if self._basis_ready:
+            return self._position, self._right, self._up, self._forward
+
         position = self.position()
-        forward = normalize(self.focus - position)
-        world_up = np.array([0.0, 0.0, 1.0])
+        direction = self.focus - position
+        if np.linalg.norm(direction) < 1e-6:
+            direction = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+        forward = normalize(direction)
+        world_up = UNIT_Z
         right = np.cross(forward, world_up)
         if np.linalg.norm(right) < 1e-6:
-            world_up = np.array([0.0, 1.0, 0.0])
+            world_up = np.array([0.0, 1.0, 0.0], dtype=np.float64)
             right = np.cross(forward, world_up)
         right = normalize(right)
         up = normalize(np.cross(right, forward))
+
+        self._position = position
+        self._right = right
+        self._up = up
+        self._forward = forward
+        self._basis_ready = True
         return position, right, up, forward
 
     def world_to_camera(self, point: np.ndarray) -> np.ndarray:
@@ -88,29 +176,42 @@ class Camera:
         pitch_speed = 1.2
         zoom_speed = 420.0
         height_speed = 220.0
+        changed = False
 
         if keys[pygame.K_a]:
             self.yaw -= orbit_speed * dt
+            changed = True
         if keys[pygame.K_d]:
             self.yaw += orbit_speed * dt
+            changed = True
         if keys[pygame.K_w]:
             self.pitch = clamp(self.pitch + pitch_speed * dt, math.radians(-89), math.radians(85))
+            changed = True
         if keys[pygame.K_s]:
             self.pitch = clamp(self.pitch - pitch_speed * dt, math.radians(-89), math.radians(85))
+            changed = True
         if keys[pygame.K_q]:
             self.radius = clamp(self.radius - zoom_speed * dt, 300.0, 1600.0)
+            changed = True
         if keys[pygame.K_e]:
             self.radius = clamp(self.radius + zoom_speed * dt, 300.0, 1600.0)
+            changed = True
         if keys[pygame.K_r]:
             self.height_offset = clamp(self.height_offset + height_speed * dt, 40.0, 420.0)
+            changed = True
         if keys[pygame.K_f]:
             self.height_offset = clamp(self.height_offset - height_speed * dt, 40.0, 420.0)
+            changed = True
+
+        if changed:
+            self._basis_ready = False
 
     def reset_view(self) -> None:
         self.yaw = math.radians(35.0)
         self.pitch = math.radians(-25.0)
         self.radius = 920.0
         self.height_offset = 140.0
+        self._basis_ready = False
 
 
 @dataclass
@@ -215,29 +316,13 @@ def draw_line3d(
 
 
 def draw_axes(surface: pygame.Surface, camera: Camera) -> None:
-    origin = np.zeros(3)
-    axis_vectors = {
-        "x": np.array([GRID_SIZE, 0, 0]),
-        "y": np.array([0, GRID_SIZE, 0]),
-        "z": np.array([0, 0, GRID_SIZE]),
-    }
-    colors = {
-        "x": (255, 100, 100),
-        "y": (100, 255, 120),
-        "z": (120, 140, 255),
-    }
-    for axis, vec in axis_vectors.items():
-        draw_line3d(surface, origin - vec, origin + vec, colors[axis], camera, 2)
+    for start, end, color in AXIS_LINES:
+        draw_line3d(surface, start, end, color, camera, 2)
 
 
 def draw_floor_grid(surface: pygame.Surface, camera: Camera) -> None:
-    for offset in range(-GRID_SIZE, GRID_SIZE + 1, GRID_STEP):
-        start_x = np.array([offset, -GRID_SIZE, 0])
-        end_x = np.array([offset, GRID_SIZE, 0])
-        start_y = np.array([-GRID_SIZE, offset, 0])
-        end_y = np.array([GRID_SIZE, offset, 0])
-        draw_line3d(surface, start_x, end_x, GRID_COLOR, camera)
-        draw_line3d(surface, start_y, end_y, GRID_COLOR, camera)
+    for start, end in GRID_LINES:
+        draw_line3d(surface, start, end, GRID_COLOR, camera)
 
 
 PILLAR_POSITIONS = [
@@ -248,16 +333,21 @@ PILLAR_POSITIONS = [
 ]
 
 
-def draw_pillars(surface: pygame.Surface, camera: Camera) -> None:
+def _build_pillar_geometry() -> list[tuple[list[np.ndarray], list[np.ndarray]]]:
+    geometry: list[tuple[list[np.ndarray], list[np.ndarray]]] = []
     for base in PILLAR_POSITIONS:
         height = 260.0 + (base[0] % 200)
-        corners = [
-            base + np.array([40, 40, 0]),
-            base + np.array([-40, 40, 0]),
-            base + np.array([-40, -40, 0]),
-            base + np.array([40, -40, 0]),
-        ]
-        top = [c + np.array([0, 0, height]) for c in corners]
+        corners = [base + offset for offset in PILLAR_CORNER_OFFSETS]
+        top = [corner + np.array([0.0, 0.0, height]) for corner in corners]
+        geometry.append((corners, top))
+    return geometry
+
+
+PILLAR_GEOMETRY = _build_pillar_geometry()
+
+
+def draw_pillars(surface: pygame.Surface, camera: Camera) -> None:
+    for corners, top in PILLAR_GEOMETRY:
         for i in range(4):
             draw_line3d(surface, corners[i], corners[(i + 1) % 4], PILLAR_COLOR, camera)
             draw_line3d(surface, top[i], top[(i + 1) % 4], PILLAR_COLOR, camera)
@@ -275,12 +365,7 @@ def draw_ring(
     color: tuple[int, int, int] = RING_COLOR,
     segments: int = 48,
 ) -> None:
-    points = []
-    for i in range(segments):
-        angle = (i / segments) * math.tau
-        points.append(
-            center + np.array([math.cos(angle) * radius, math.sin(angle) * radius, 0.0])
-        )
+    points = get_ring_points(center, radius, segments)
     for i in range(segments):
         draw_line3d(surface, points[i], points[(i + 1) % segments], color, camera, 2)
 
@@ -297,33 +382,39 @@ CRYSTAL_POSITIONS = [
     np.array([120.0, 420.0, 300.0]),
 ]
 
+CRYSTAL_TIP_OFFSETS = np.array(
+    [
+        [0.0, 0.0, 90.0],
+        [54.0, 0.0, -36.0],
+        [-54.0, 0.0, -36.0],
+        [0.0, 54.0, -36.0],
+        [0.0, -54.0, -36.0],
+    ],
+    dtype=np.float64,
+)
 
-def draw_crystal(surface: pygame.Surface, camera: Camera, center: np.ndarray, size: float = 90.0) -> None:
-    tips = [
-        center + np.array([0.0, 0.0, size]),
-        center + np.array([size * 0.6, 0.0, -size * 0.4]),
-        center + np.array([-size * 0.6, 0.0, -size * 0.4]),
-        center + np.array([0.0, size * 0.6, -size * 0.4]),
-        center + np.array([0.0, -size * 0.6, -size * 0.4]),
-    ]
-    edges = [
-        (0, 1),
-        (0, 2),
-        (0, 3),
-        (0, 4),
-        (1, 3),
-        (3, 2),
-        (2, 4),
-        (4, 1),
-    ]
-    for start_idx, end_idx in edges:
+CRYSTAL_EDGES = [
+    (0, 1),
+    (0, 2),
+    (0, 3),
+    (0, 4),
+    (1, 3),
+    (3, 2),
+    (2, 4),
+    (4, 1),
+]
+
+
+def draw_crystal(surface: pygame.Surface, camera: Camera, center: np.ndarray) -> None:
+    tips = center + CRYSTAL_TIP_OFFSETS
+    for start_idx, end_idx in CRYSTAL_EDGES:
         draw_line3d(surface, tips[start_idx], tips[end_idx], CRYSTAL_COLOR, camera, 2)
 
 
 def draw_crystals(surface: pygame.Surface, camera: Camera) -> None:
     for position in CRYSTAL_POSITIONS:
         wobble = math.sin(pygame.time.get_ticks() * 0.001 + position[0] * 0.01) * 20.0
-        draw_crystal(surface, camera, position + np.array([0.0, 0.0, wobble]))
+        draw_crystal(surface, camera, position + UNIT_Z * wobble)
 
 
 def draw_objective_targets(surface: pygame.Surface, camera: Camera, tracker: ObjectiveTracker) -> None:
@@ -336,7 +427,9 @@ def draw_objective_targets(surface: pygame.Surface, camera: Camera, tracker: Obj
         ring_radius = 120.0 if idx == tracker.current_index else 90.0
         draw_ring(surface, camera, target, ring_radius, color=color, segments=60)
         draw_ring(surface, camera, target, ring_radius * 1.2, color=color, segments=60)
-        draw_line3d(surface, target, target - np.array([0.0, 0.0, target[2]]), color, camera, 1)
+    ground_point = target.copy()
+    ground_point[2] = 0.0
+    draw_line3d(surface, target, ground_point, color, camera, 1)
 
 
 def draw_capture_flashes(surface: pygame.Surface, camera: Camera, flashes: list[CaptureFlash]) -> None:
@@ -385,6 +478,7 @@ def draw_hud(
     font: pygame.font.Font,
     objective: ObjectiveTracker | None = None,
     control_state: ControlState | None = None,
+    fps: float | None = None,
 ) -> None:
     hud_lines = [
         "3D Projectile Steering",
@@ -395,6 +489,8 @@ def draw_hud(
         f"|w|: {magnitude(projectile.state.control_axis):.2f}",
         f"Cam r={camera.radius:.0f} pitch={math.degrees(camera.pitch):.1f}°",
     ]
+    if fps is not None:
+        hud_lines.append(f"FPS: {fps:.0f}/{FPS_TARGET}")
     if control_state is not None:
         hud_lines.append(
             f"Direction lock: {'ON' if control_state.lock_direction else 'OFF'} (L toggles)"
@@ -501,20 +597,21 @@ def main() -> None:
     trail: deque[np.ndarray] = deque(maxlen=config.trail_length)
     camera = Camera()
     camera.focus = projectile.state.position.copy()
+    camera._basis_ready = False
     objective = ObjectiveTracker()
     capture_flashes: list[CaptureFlash] = []
     control_state = ControlState()
 
     running = True
     while running:
-        dt = clock.tick(60) / 1000.0
+        dt = clock.tick(FPS_TARGET) / 1000.0
 
         running = handle_events(trail, camera, control_state)
         if not running:
             break
 
         camera.handle_input(dt)
-        camera.update_focus(projectile.state.position + np.array([0.0, 0.0, 30.0]), dt)
+        camera.update_focus(projectile.state.position + FOCUS_OFFSET, dt)
 
         rotation_input = rotation_input_from_keys(control_state, projectile, objective)
         projectile.rotate_acceleration(rotation_input, dt)
@@ -528,6 +625,7 @@ def main() -> None:
         for flash in capture_flashes:
             flash.age += dt
         capture_flashes[:] = [flash for flash in capture_flashes if flash.age < flash.duration]
+        fps_display = clock.get_fps()
 
         screen.blit(background, (0, 0))
         draw_floor_grid(screen, camera)
@@ -540,7 +638,7 @@ def main() -> None:
         draw_trail(screen, trail, camera)
         draw_projectile(screen, projectile, camera)
         draw_vectors(screen, projectile, camera)
-        draw_hud(screen, projectile, camera, font, objective, control_state)
+        draw_hud(screen, projectile, camera, font, objective, control_state, fps_display)
 
         pygame.display.flip()
 
