@@ -1,5 +1,7 @@
 # 3D Projectile Steering Demo
 
+A “vibe coding” uniform circular motion simulator with changing centers. 
+
 This mini-game demonstrates a projectile that moves through 3D space with constant speed while the player steers by rotating the acceleration vector around the velocity direction. The result is a smooth, controllable arc that keeps speed and curvature radius predictable. The latest update adds swappable camera rigs plus a pointy projectile silhouette so you can instantly read heading while carving ribbons through the air.
 
 ## Features
