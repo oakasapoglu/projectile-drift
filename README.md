@@ -2,6 +2,7 @@
 
 A 3D physics simulation built with Three.js. This project demonstrates a constant-speed projectile where steering is achieved by rotating the acceleration vector.
 
+[Projectile Drift: Play it!](https://oakasapoglu.github.io/projectile-drift/game.html)
 
 ## Project History & Development
 
