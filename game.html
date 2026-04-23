@@ -21,6 +21,7 @@
         <div class="row"><span class="lbl">Camera</span><span id="hud-cam" class="val">FREE</span></div>
         <div id="hud-lock" class="row" style="display:none"><span class="lbl">Target Assist</span><span
                 class="val accent">LOCKED</span></div>
+        <div class="row"><span class="lbl">FPS</span><span id="hud-fps" class="val">--</span></div>
     </div>
 
     <div id="score-panel" class="panel">
@@ -182,7 +183,9 @@
             camPitch: 0.3,
             camDist: 180,
             camHeight: 60,
-            camLerp: new THREE.Vector3()
+            camLerp: new THREE.Vector3(),
+            lastFpsUpdate: performance.now(),
+            frames: 0
         };
 
         const GATE_COUNT = 5;
@@ -509,6 +512,13 @@
             document.getElementById('hud-score').textContent = STATE.score;
             document.getElementById('hud-laps').textContent = STATE.laps;
             document.getElementById('hud-timer').textContent = ((now - STATE.lapStart) / 1000).toFixed(1) + 's';
+
+            STATE.frames++;
+            if (now - STATE.lastFpsUpdate > 1000) {
+                document.getElementById('hud-fps').textContent = STATE.frames;
+                STATE.frames = 0;
+                STATE.lastFpsUpdate = now;
+            }
 
             composer.render();
         }
