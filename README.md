@@ -6,11 +6,11 @@ A 3D physics simulation built with Three.js. This project demonstrates a constan
 
 ## Project History & Development
 
-This project originated as a high-fidelity port of a 3D projectile simulation. The development followed an AI-augmented workflow:
+This project originated as a port of a 3D projectile simulation from python to JS, see [weird-bazooka](https://github.com/hikasap/weird-bazooka). The development followed an AI-augmented workflow:
 
 1.  **Specification**: The core logic and physics requirements were defined in `desing.md`.
 2.  **Prototyping**: Using the design specs, Claude Opus was utilized to generate a comprehensive, single-file HTML prototype.
-3.  **Iterative Refinement**: The codebase underwent extensive debugging and expansion. Features like the modular theme system, dynamic HUD, and integrated audio were added to evolve the prototype into the current version.
+3.  **Iterative Refinement**: The codebase underwent extensive debugging and expansion. Features like the modular theme system, and integrated audio were added to evolve the prototype into the current version.
 
 ## Features
 - Constant-speed motion logic.
