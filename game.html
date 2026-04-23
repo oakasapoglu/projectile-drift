@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Projectile Steering Demo - V4</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+
+</head>
+
+<body>
+
+    <div id="hud" class="panel">
+        <div class="row"><span class="lbl">Speed |v|</span><span id="hud-v" class="val">0.00</span></div>
+        <div class="row"><span class="lbl">Accel |a|</span><span id="hud-a" class="val">0.00</span></div>
+        <div class="row"><span class="lbl">Radius r</span><span id="hud-r" class="val">0.00</span></div>
+        <div class="row"><span class="lbl">Ang Vel |ω|</span><span id="hud-w" class="val">0.00</span></div>
+        <div class="row"><span class="lbl">Camera</span><span id="hud-cam" class="val">FREE</span></div>
+        <div id="hud-lock" class="row" style="display:none"><span class="lbl">Target Assist</span><span
+                class="val accent">LOCKED</span></div>
+    </div>
+
+    <div id="score-panel" class="panel">
+        <div class="row"><span class="lbl">Score</span><span id="hud-score" class="val">0</span></div>
+        <div class="row"><span class="lbl">Laps</span><span id="hud-laps" class="val">0</span></div>
+        <div class="row"><span class="lbl">Timer</span><span id="hud-timer" class="val">0.0s</span></div>
+        <div class="row"><span class="lbl">Best</span><span id="hud-best" class="val">--</span></div>
+        <div id="lap-log"></div>
+    </div>
+
+    <div id="controls-hint" class="panel">
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="2">SYSTEM CONTROLS</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><b>← / →</b></td>
+                    <td>Steer (rotate around)</td>
+                </tr>
+                <tr>
+                    <td><b>O / P</b></td>
+                    <td>Adjust Acceleration</td>
+                </tr>
+                <tr>
+                    <td><b>J / K</b></td>
+                    <td>Adjust Speed</td>
+                </tr>
+                <tr style="height: 6px;">
+                    <td></td>
+                    <td></td>
+                </tr>
+                <tr>
+                    <td><b>WASD</b></td>
+                    <td>Look Around</td>
+                </tr>
+                <tr>
+                    <td><b>Q / E</b></td>
+                    <td>Zoom In / Out</td>
+                </tr>
+                <tr>
+                    <td><b>R / F</b></td>
+                    <td>Camera Height Up / Down</td>
+                </tr>
+                <tr style="height: 6px;">
+                    <td></td>
+                    <td></td>
+                </tr>
+                <tr>
+                    <td><b>V / C</b></td>
+                    <td>Cycle Cam / Reset View</td>
+                </tr>
+                <tr>
+                    <td><b>L / T / M</b></td>
+                    <td>Toggle Assist / Theme / Music</td>
+                </tr>
+                <tr>
+                    <td><b>Space</b></td>
+                    <td>Clear Trail Path</td>
+                </tr>
+                <tr>
+                    <td><b>Esc</b></td>
+                    <td>Reset Game & Score</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="music-badge" class="panel">SILENT</div>
+    <div id="theme-badge" class="panel">DARK</div>
+
+    <script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+
+    <script src="themes.js"></script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        let themeIdx = 0;
+
+        function applyTheme(idx) {
+            const t = THEMES[idx];
+            const root = document.documentElement.style;
+            root.setProperty('--panel-bg', t.panelBg);
+            root.setProperty('--panel-border', t.panelBorder);
+            root.setProperty('--panel-glow', t.panelGlow);
+            root.setProperty('--text-dim', t.textDim);
+            root.setProperty('--text-bright', t.textBright);
+            root.setProperty('--accent', t.accent);
+            root.setProperty('--best-color', t.best);
+            document.getElementById('theme-badge').textContent = t.name;
+
+            scene.background.set(t.bg);
+            scene.fog.color.set(t.fog);
+            grid.material.color.set(t.gridMain);
+
+            pillars.forEach(p => p.material.color.set(t.pillar));
+            beacons.forEach(b => b.material.color.set(t.beacon));
+
+            projectile.mesh.material.color.set(t.projectile);
+            projectile.trail.material.color.set(t.trail);
+            projectile.accBeam.material.color.set(t.accent);
+
+            updateGateVisuals();
+        }
+
+        /* ═══════════════════════════════════════════
+           MUSIC SYSTEM
+           ═══════════════════════════════════════════ */
+        let musicIdx = MUSICS.length - 1; // Start Silent
+        let currentAudio = null;
+
+        function applyMusic(idx) {
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+
+            const m = MUSICS[idx];
+            document.getElementById('music-badge').textContent = `MUSIC: ${m.name}`;
+
+            if (m.url) {
+                currentAudio = new Audio(m.url);
+                currentAudio.loop = true;
+                currentAudio.play().catch(e => console.log("Audio play blocked until interaction."));
+            }
+        }
+
+        /* ═══════════════════════════════════════════
+           GAME STATE
+           ═══════════════════════════════════════════ */
+        const STATE = {
+            vMag: 45,
+            aMag: 30,
+            steerRate: 4.2,
+            score: 0,
+            laps: 0,
+            bestTime: Infinity,
+            lapStart: performance.now(),
+            targetAssist: false,
+            camMode: 'FREE',
+            activeGate: 0,
+            lastTime: performance.now(),
+
+            // Camera Orbit (Spherical)
+            camYaw: 0,
+            camPitch: 0.3,
+            camDist: 180,
+            camHeight: 60,
+            camLerp: new THREE.Vector3()
+        };
+
+        const GATE_COUNT = 5;
+        const TRAIL_MAX = 1000;
+
+        /* ═══════════════════════════════════════════
+           THREE.JS BOILERPLATE
+           ═══════════════════════════════════════════ */
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(THEMES[0].bg);
+        scene.fog = new THREE.FogExp2(THEMES[0].fog, 0.0015);
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 4000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, camera));
+        const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.6, 0.4, 0.1);
+        composer.addPass(bloom);
+
+        const grid = new THREE.GridHelper(2000, 80, THEMES[0].gridMain, THEMES[0].gridSub);
+        scene.add(grid);
+
+        const pillars = [];
+        const beacons = [];
+        function createArena() {
+            for (let i = 0; i < 35; i++) {
+                const h = 20 + Math.random() * 100;
+                const x = (Math.random() - 0.5) * 1200;
+                const z = (Math.random() - 0.5) * 1200;
+
+                const pGeo = new THREE.BoxGeometry(3, h, 3);
+                const pMat = new THREE.MeshBasicMaterial({ color: THEMES[0].pillar, wireframe: true });
+                const pillar = new THREE.Mesh(pGeo, pMat);
+                pillar.position.set(x, h / 2, z);
+                scene.add(pillar);
+                pillars.push(pillar);
+
+                const bGeo = new THREE.SphereGeometry(2, 12, 12);
+                const bMat = new THREE.MeshBasicMaterial({ color: THEMES[0].beacon });
+                const beacon = new THREE.Mesh(bGeo, bMat);
+                beacon.position.set(x, h + 2, z);
+                scene.add(beacon);
+                beacons.push(beacon);
+            }
+        }
+        createArena();
+
+        /* ═══════════════════════════════════════════
+           PROJECTILE & PHYSICS
+           ═══════════════════════════════════════════ */
+        class Projectile {
+            constructor() {
+                this.pos = new THREE.Vector3(0, 50, 150);
+                this.vel = new THREE.Vector3(STATE.vMag, 0, 0);
+                this.acc = new THREE.Vector3(0, STATE.aMag, 0);
+                this.acc.projectOnPlane(this.vel.clone().normalize()).setLength(STATE.aMag);
+
+                const geo = new THREE.ConeGeometry(1.5, 6, 12);
+                geo.rotateX(Math.PI / 2);
+                const mat = new THREE.MeshBasicMaterial({ color: THEMES[0].projectile, wireframe: true });
+                this.mesh = new THREE.Mesh(geo, mat);
+                scene.add(this.mesh);
+
+                this.points = [];
+                const tGeo = new THREE.BufferGeometry();
+                // Slightly thicker look using bloom + transparency
+                const tMat = new THREE.LineBasicMaterial({
+                    color: THEMES[0].trail,
+                    transparent: true,
+                    opacity: 1,
+                    linewidth: 44 // Only works in some drivers, but good to have
+                });
+                this.trail = new THREE.Line(tGeo, tMat);
+                this.trail.frustumCulled = false;
+                scene.add(this.trail);
+
+                // Heavy Acceleration Beam (Glowing pointer in 'acc' direction)
+                const bGeo = new THREE.CylinderGeometry(0.1, 0.1, 1, 8);
+                const bMat = new THREE.MeshBasicMaterial({
+                    color: THEMES[0].accent,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                this.accBeam = new THREE.Mesh(bGeo, bMat);
+                scene.add(this.accBeam);
+            }
+
+            update(dt, steer, targetPos) {
+                const vDir = this.vel.clone().normalize();
+
+                // Steering (Rodrigues)
+                if (STATE.targetAssist && targetPos) {
+                    const toTarget = targetPos.clone().sub(this.pos);
+                    const want = toTarget.projectOnPlane(vDir).normalize().multiplyScalar(STATE.aMag);
+                    const angle = this.acc.angleTo(want);
+                    if (angle > 0.005) {
+                        const step = Math.min(angle, STATE.steerRate * dt);
+                        const cross = new THREE.Vector3().crossVectors(this.acc, want);
+                        const dir = cross.dot(vDir) > 0 ? 1 : -1;
+                        this.acc.applyAxisAngle(vDir, dir * step);
+                    }
+                } else if (steer !== 0) {
+                    this.acc.applyAxisAngle(vDir, steer * STATE.steerRate * dt);
+                }
+
+                // Apply Logarithmic changes from keys
+                this.acc.setLength(STATE.aMag);
+
+                // Integration
+                this.vel.add(this.acc.clone().multiplyScalar(dt));
+                this.vel.setLength(STATE.vMag);
+                this.acc.projectOnPlane(this.vel.clone().normalize()).setLength(STATE.aMag); // Maintain Orthogonality
+                this.pos.add(this.vel.clone().multiplyScalar(dt));
+
+                // Visuals
+                this.mesh.position.copy(this.pos);
+                this.mesh.lookAt(this.pos.clone().add(this.vel));
+
+                this.points.push(this.pos.clone());
+                if (this.points.length > TRAIL_MAX) this.points.shift();
+                this.trail.geometry.setFromPoints(this.points);
+
+                // Update Acceleration Beam
+                const beamLen = 6;
+                const accDir = this.acc.clone().normalize();
+                this.accBeam.position.copy(this.pos.clone().add(accDir.clone().multiplyScalar(beamLen / 2)));
+                this.accBeam.scale.y = beamLen;
+                this.accBeam.lookAt(this.pos.clone().add(accDir.clone().multiplyScalar(beamLen + 10)));
+                this.accBeam.rotateX(Math.PI / 2);
+            }
+
+            reset() {
+                this.pos.set(0, 50, 150);
+                this.vel.set(STATE.vMag, 0, 0);
+                this.acc.set(0, STATE.aMag, 0);
+                this.acc.projectOnPlane(this.vel.clone().normalize()).setLength(STATE.aMag);
+                this.clearTrail();
+                this.accBeam.scale.y = 0.001;
+            }
+
+            clearTrail() {
+                this.points = [];
+                this.trail.geometry.setFromPoints([]);
+            }
+        }
+
+        const projectile = new Projectile();
+
+        /* ═══════════════════════════════════════════
+           GATES & OBJECTIVE
+           ═══════════════════════════════════════════ */
+        const gates = [];
+        function spawnGates() {
+            gates.forEach(g => scene.remove(g));
+            gates.length = 0;
+            for (let i = 0; i < GATE_COUNT; i++) {
+                const angle = (i / GATE_COUNT) * Math.PI * 2;
+                const dist = 300 + Math.random() * 150;
+                const g = new THREE.Group();
+                g.position.set(Math.cos(angle) * dist, 30 + Math.random() * 80, Math.sin(angle) * dist);
+
+                const torus = new THREE.Mesh(
+                    new THREE.TorusGeometry(10, 0.5, 16, 64),
+                    new THREE.MeshBasicMaterial({ color: 0xff00ff })
+                );
+                g.add(torus);
+                scene.add(g);
+                gates.push(g);
+            }
+            STATE.activeGate = 0;
+            updateGateVisuals();
+        }
+
+        function updateGateVisuals() {
+            const t = THEMES[themeIdx];
+            gates.forEach((g, i) => {
+                const torus = g.children[0];
+                if (i === STATE.activeGate) {
+                    torus.material.color.set(t.gateActive);
+                    g.scale.setScalar(1.6);
+                } else {
+                    torus.material.color.set(t.gateDim);
+                    g.scale.setScalar(1.0);
+                }
+            });
+        }
+
+        spawnGates();
+
+        /* ═══════════════════════════════════════════
+           INPUT HANDLING
+           ═══════════════════════════════════════════ */
+        const keys = {};
+        window.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            if (e.code === 'KeyT') {
+                themeIdx = (themeIdx + 1) % THEMES.length;
+                applyTheme(themeIdx);
+            }
+            if (e.code === 'KeyM') {
+                musicIdx = (musicIdx + 1) % MUSICS.length;
+                applyMusic(musicIdx);
+            }
+            if (e.code === 'KeyV') cycleCamera();
+            if (e.code === 'KeyL') {
+                STATE.targetAssist = !STATE.targetAssist;
+                document.getElementById('hud-lock').style.display = STATE.targetAssist ? 'flex' : 'none';
+            }
+            if (e.code === 'KeyC') resetCamera();
+            if (e.code === 'Space') projectile.clearTrail();
+            if (e.code === 'Escape') resetGame();
+        });
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        function cycleCamera() {
+            const modes = ['FREE', 'CHASE', 'CENTER'];
+            STATE.camMode = modes[(modes.indexOf(STATE.camMode) + 1) % modes.length];
+            document.getElementById('hud-cam').textContent = STATE.camMode;
+        }
+
+        function resetCamera() {
+            STATE.camMode = 'FREE';
+            STATE.camYaw = 0;
+            STATE.camPitch = 0.3;
+            STATE.camDist = 180;
+            STATE.camHeight = 60;
+            document.getElementById('hud-cam').textContent = 'FREE';
+        }
+
+        function resetGame() {
+            STATE.score = 0;
+            STATE.laps = 0;
+            STATE.bestTime = Infinity;
+            STATE.lapStart = performance.now();
+            document.getElementById('hud-best').textContent = '--';
+            document.getElementById('lap-log').innerHTML = '';
+            projectile.reset();
+            spawnGates();
+        }
+
+        /* ═══════════════════════════════════════════
+           MAIN RENDER LOOP
+           ═══════════════════════════════════════════ */
+        function loop() {
+            requestAnimationFrame(loop);
+            const now = performance.now();
+            const dt = Math.min((now - STATE.lastTime) / 1000, 0.1);
+            STATE.lastTime = now;
+
+            const logFactor = Math.pow(1.1, dt * 5);
+            if (keys['KeyO']) STATE.aMag *= logFactor;
+            if (keys['KeyP']) STATE.aMag /= logFactor;
+            if (keys['KeyJ']) STATE.vMag *= logFactor;
+            if (keys['KeyK']) STATE.vMag /= logFactor;
+            STATE.aMag = Math.max(0.1, STATE.aMag);
+            STATE.vMag = Math.max(0.1, STATE.vMag);
+
+            let steer = 0;
+            if (keys['ArrowLeft']) steer += 1;
+            if (keys['ArrowRight']) steer -= 1;
+
+            const target = gates[STATE.activeGate];
+            projectile.update(dt, steer, target.position);
+
+            if (projectile.pos.distanceTo(target.position) < 15) {
+                STATE.score += 100;
+                STATE.activeGate++;
+                if (STATE.activeGate >= GATE_COUNT) {
+                    STATE.laps++;
+                    const lapTime = (now - STATE.lapStart) / 1000;
+                    if (lapTime < STATE.bestTime) {
+                        STATE.bestTime = lapTime;
+                        document.getElementById('hud-best').textContent = lapTime.toFixed(2) + 's';
+                    }
+                    const logEntry = document.createElement('div');
+                    logEntry.className = 'lap-entry' + (lapTime === STATE.bestTime ? ' lap-best' : '');
+                    logEntry.textContent = `Lap ${STATE.laps}: ${lapTime.toFixed(2)}s`;
+                    const log = document.getElementById('lap-log');
+                    log.insertBefore(logEntry, log.firstChild);
+                    STATE.lapStart = now;
+                    spawnGates();
+                } else {
+                    updateGateVisuals();
+                }
+            }
+
+            if (STATE.camMode === 'FREE') {
+                if (keys['KeyA']) STATE.camYaw += 2.2 * dt;
+                if (keys['KeyD']) STATE.camYaw -= 2.2 * dt;
+                if (keys['KeyW']) STATE.camPitch += 1.8 * dt;
+                if (keys['KeyS']) STATE.camPitch -= 1.8 * dt;
+                if (keys['KeyQ']) STATE.camDist = Math.max(10, STATE.camDist - 150 * dt);
+                if (keys['KeyE']) STATE.camDist += 150 * dt;
+                if (keys['KeyR']) STATE.camHeight += 100 * dt;
+                if (keys['KeyF']) STATE.camHeight -= 100 * dt;
+
+                STATE.camPitch = Math.max(-1.3, Math.min(1.3, STATE.camPitch));
+                STATE.camLerp.lerp(projectile.pos, 0.1);
+
+                const x = STATE.camLerp.x + Math.sin(STATE.camYaw) * Math.cos(STATE.camPitch) * STATE.camDist;
+                const y = STATE.camLerp.y + STATE.camHeight + Math.sin(STATE.camPitch) * STATE.camDist;
+                const z = STATE.camLerp.z + Math.cos(STATE.camYaw) * Math.cos(STATE.camPitch) * STATE.camDist;
+                camera.position.set(x, y, z);
+                camera.lookAt(STATE.camLerp);
+            } else if (STATE.camMode === 'CHASE') {
+                const back = projectile.vel.clone().normalize().multiplyScalar(-50);
+                const up = new THREE.Vector3(0, 20, 0);
+                camera.position.lerp(projectile.pos.clone().add(back).add(up), 0.1);
+                camera.lookAt(projectile.pos.clone().add(projectile.vel.clone().multiplyScalar(10)));
+            } else {
+                camera.position.set(0, 150, 0);
+                camera.lookAt(projectile.pos);
+            }
+
+            const r = (STATE.vMag * STATE.vMag) / STATE.aMag;
+            document.getElementById('hud-v').textContent = STATE.vMag.toFixed(2);
+            document.getElementById('hud-a').textContent = STATE.aMag.toFixed(2);
+            document.getElementById('hud-r').textContent = r.toFixed(2);
+            document.getElementById('hud-w').textContent = (STATE.vMag / r).toFixed(4);
+            document.getElementById('hud-score').textContent = STATE.score;
+            document.getElementById('hud-laps').textContent = STATE.laps;
+            document.getElementById('hud-timer').textContent = ((now - STATE.lapStart) / 1000).toFixed(1) + 's';
+
+            composer.render();
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        applyTheme(0);
+        applyMusic(musicIdx);
+        loop();
+    </script>
+</body>
+
+</html>
