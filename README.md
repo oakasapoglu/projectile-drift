@@ -4,7 +4,9 @@ A 3D physics simulation built with Three.js. This project demonstrates a constan
 
 [Projectile Drift: Play it!](https://oakasapoglu.github.io/projectile-drift/game.html)
 
-
+- Don't forget to cycle camera view, press V.
+- Set the music up, press M.
+- Change the theme, press T.
 
 ![Projectile Drift: Play it!](./screenshots/0.png)
 
