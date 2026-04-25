@@ -4,6 +4,18 @@ A 3D physics simulation built with Three.js. This project demonstrates a constan
 
 [Projectile Drift: Play it!](https://oakasapoglu.github.io/projectile-drift/game.html)
 
+
+
+![Projectile Drift: Play it!](./screenshots/0.png)
+
+![Projectile Drift: Play it!](./screenshots/1.png)
+
+![Projectile Drift: Play it!](./screenshots/2.png)
+
+![Projectile Drift: Play it!](./screenshots/3.png)
+
+![Projectile Drift: Play it!](./screenshots/4.png)
+
 ## Project History & Development
 
 This project originated as a port of a 3D projectile simulation from python to JS, see [weird-bazooka](https://github.com/hikasap/weird-bazooka). The development followed an AI-augmented workflow:
